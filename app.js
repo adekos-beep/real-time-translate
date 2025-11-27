@@ -23,7 +23,9 @@ const AppState = {
     },
     sessionStart: null,
     audioChunks: [],
-    transcriptionBuffer: ''
+    transcriptionBuffer: '',
+    audioQueue: [],
+    isPlayingAudio: false
 };
 
 // === Constants ===
@@ -589,9 +591,10 @@ function extractTranslation(text) {
 async function speakText(text, lang) {
     try {
         const audioBlob = await synthesizeSpeech(text, lang);
-        await playAudio(audioBlob);
+        await queueAudio(audioBlob);
     } catch (error) {
         console.error('TTS error:', error);
+        logToConsole(`🔇 Erro TTS: ${error.message}`, 'error');
     }
 }
 
@@ -674,15 +677,67 @@ async function synthesizeWithOpenAI(text) {
     return await response.blob();
 }
 
+// Audio Queue Management
+async function queueAudio(audioBlob) {
+    AppState.audioQueue.push(audioBlob);
+    if (!AppState.isPlayingAudio) {
+        await processAudioQueue();
+    }
+}
+
+async function processAudioQueue() {
+    while (AppState.audioQueue.length > 0) {
+        AppState.isPlayingAudio = true;
+        const audioBlob = AppState.audioQueue.shift();
+        try {
+            await playAudio(audioBlob);
+        } catch (error) {
+            console.error('Audio playback error:', error);
+            logToConsole(`🔇 Erro ao reproduzir áudio: ${error.message}`, 'error');
+        }
+    }
+    AppState.isPlayingAudio = false;
+}
+
 async function playAudio(audioBlob) {
+    // Ensure AudioContext is ready (critical for iOS)
+    if (AppState.audioContext && AppState.audioContext.state === 'suspended') {
+        try {
+            await AppState.audioContext.resume();
+            console.log('AudioContext resumed');
+        } catch (error) {
+            console.warn('Failed to resume AudioContext:', error);
+        }
+    }
+
     return new Promise((resolve, reject) => {
-        const audio = new Audio(URL.createObjectURL(audioBlob));
+        const audio = new Audio();
+        const url = URL.createObjectURL(audioBlob);
+        
         audio.onended = () => {
-            URL.revokeObjectURL(audio.src);
+            console.log('Audio playback completed');
+            URL.revokeObjectURL(url);
             resolve();
         };
-        audio.onerror = reject;
-        audio.play().catch(reject);
+        
+        audio.onerror = (error) => {
+            console.error('Audio element error:', error);
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to play audio'));
+        };
+        
+        audio.oncanplaythrough = () => {
+            audio.play().then(() => {
+                console.log('Audio playback started');
+            }).catch(err => {
+                console.error('Play failed:', err);
+                URL.revokeObjectURL(url);
+                reject(err);
+            });
+        };
+        
+        audio.src = url;
+        audio.load();
     });
 }
 
@@ -749,10 +804,12 @@ function checkInstallStatus() {
 async function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
         try {
-            await navigator.serviceWorker.register('/service-worker.js');
-            console.log('Service Worker registered');
+            // Use relative path for GitHub Pages compatibility
+            const registration = await navigator.serviceWorker.register('./service-worker.js');
+            console.log('Service Worker registered:', registration);
         } catch (error) {
             console.error('Service Worker registration failed:', error);
+            // Non-critical error, app still works without SW
         }
     }
 }
