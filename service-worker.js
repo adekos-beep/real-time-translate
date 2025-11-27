@@ -1,10 +1,10 @@
-const CACHE_NAME = 'tradutor-v1';
+const CACHE_NAME = 'tradutor-v2';
 const urlsToCache = [
-    '/',
-    '/index.html',
-    '/styles.css',
-    '/app.js',
-    '/manifest.json'
+    './',
+    './index.html',
+    './styles.css',
+    './app.js',
+    './manifest.json'
 ];
 
 // Install event - cache files
